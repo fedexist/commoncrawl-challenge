@@ -1,0 +1,20 @@
+[project]
+name = "commoncrawl-challenge"
+version = "0.1.0"
+description = "Coding challenge"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiofiles>=24.1.0",
+    "apache-airflow>=2.10.5",
+    "beautifulsoup4>=4.13.3",
+    "polars>=1.26.0",
+    "psycopg2-binary>=2.9.10",
+    "requests>=2.32.3",
+    "warcio>=1.7.5",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.4",
+]

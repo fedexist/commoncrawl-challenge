@@ -1,0 +1,38 @@
+version: '3'
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres_container
+    environment:
+      - POSTGRES_USER=cc_user
+      - POSTGRES_PASSWORD=cc_pass
+      - POSTGRES_DB=cc_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  airflow:
+    image: apache/airflow:2.5.1
+    container_name: airflow_container
+    depends_on:
+      - postgres
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://cc_user:cc_pass@postgres:5432/cc_db
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - ./logs:/opt/airflow/logs
+      - ./commoncrawl:/opt/airflow/commoncrawl
+    ports:
+      - "8080:8080"
+    command: >
+      bash -c "
+      airflow db init && \
+      airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com && \
+      airflow webserver & \
+      airflow scheduler"
+
+volumes:
+  postgres_data:

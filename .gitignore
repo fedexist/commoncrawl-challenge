@@ -1,0 +1,13 @@
+commoncrawl/
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.db
+*.sqlite
+*.log
+*.csv
+*.tsv
+*.parquet
+logs/

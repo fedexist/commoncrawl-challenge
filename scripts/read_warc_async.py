@@ -1,4 +1,5 @@
 import asyncio
+import os
 import aiofiles
 import io
 from pathlib import Path
@@ -6,7 +7,7 @@ from typing import AsyncGenerator
 from warcio.archiveiterator import ArchiveIterator
 from bs4 import BeautifulSoup
 
-async def generate_links(file_path: Path) -> AsyncGenerator[str, None]:
+async def generate_links(file_path: Path, limit: int = None) -> AsyncGenerator[str, None]:
     """
     Asynchronously reads a WARC file, parses HTML content,
     and yields links one by one.
@@ -18,13 +19,13 @@ async def generate_links(file_path: Path) -> AsyncGenerator[str, None]:
         warc_bytes = await afp.read()
 
     # Convert the bytes to a BytesIO for warcio's ArchiveIterator
-    max_links = 1000
     count = 0
     with io.BytesIO(warc_bytes) as warc_stream:
         for record in ArchiveIterator(warc_stream):
             if record.rec_type == 'response':
                 content_type = record.http_headers.get('Content-Type', '')
                 source_url = record.rec_headers.get('WARC-Target-URI', '')
+                yield source_url
                 if 'text/html' in content_type.lower():
                     html_content = record.content_stream().read()
                     html_str = html_content.decode('utf-8', errors='replace')
@@ -34,18 +35,18 @@ async def generate_links(file_path: Path) -> AsyncGenerator[str, None]:
                         is_valid_link = a_tag['href'].startswith(('http://', 'https://')) and not a_tag['href'] in {'http://', 'https://'}
                         if is_valid_link:
                             count += 1
-                            yield (source_url, a_tag['href'])
-                            if count >= max_links:
+                            yield a_tag['href']
+                            if limit and count >= limit:
                                 return
 
-async def read_warc_and_enqueue(file_path: Path, queue: asyncio.Queue):
+async def read_warc_and_enqueue(file_path: Path, max_links_per_file: int, queue: asyncio.Queue):
     """
     Reads links from a single WARC file (async generator),
     and puts them on the queue for the writer to consume.
     """
-    async for url_link_tuple in generate_links(file_path):
+    async for link in generate_links(file_path, max_links_per_file):
         # Put each link on the queue as soon as we find it
-        await queue.put(url_link_tuple)
+        await queue.put(link)
 
 async def write_links_to_file(queue: asyncio.Queue, output_file: Path):
     """
@@ -55,13 +56,25 @@ async def write_links_to_file(queue: asyncio.Queue, output_file: Path):
     print(f"Printer task started, writing to {output_file}")
     async with aiofiles.open(output_file, 'w') as afp:
         while True:
-            source_url, link = await queue.get()  # blocks until an item is available
-            await afp.write(f"{source_url},{link}" + "\n")
+            link = await queue.get()  # blocks until an item is available
+            await afp.write(link + "\n")
             queue.task_done()
 
 async def main(segments_folder: str | Path):
     segments_folder = Path(segments_folder)
     warc_files = list(segments_folder.glob("*.warc.gz"))
+    
+    max_links_per_file = os.getenv("MAX_LINKS_PER_FILE")
+    if max_links_per_file:
+        try:
+            max_links_per_file = int(max_links_per_file)
+        except ValueError:
+            print("Invalid value for MAX_LINKS_PER_FILE. It should be an integer.")
+            return
+    else:
+        max_links_per_file = None
+    print(f"Max links per file: {max_links_per_file}")
+    
     if not warc_files:
         print("No WARC files found in the specified directory.")
         return
@@ -80,7 +93,7 @@ async def main(segments_folder: str | Path):
     # Create producer tasks to parse each WARC file in parallel
     tasks = []
     for file_path in warc_files:
-        tasks.append(asyncio.create_task(read_warc_and_enqueue(file_path, queue)))
+        tasks.append(asyncio.create_task(read_warc_and_enqueue(file_path, max_links_per_file, queue)))
 
     # Wait for all WARC parsing tasks to finish
     await asyncio.gather(*tasks)
@@ -94,4 +107,8 @@ async def main(segments_folder: str | Path):
     print(f"Links successfully written to {output_file}")
 
 if __name__ == "__main__":
-    asyncio.run(main("./commoncrawl/segments/"))
+    segments_folder = os.getenv("SEGMENTS_FOLDER")
+    if not segments_folder:
+        print("Please set the SEGMENTS_FOLDER environment variable.")
+        exit(1)
+    asyncio.run(main(segments_folder))

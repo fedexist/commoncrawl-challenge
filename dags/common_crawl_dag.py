@@ -34,12 +34,9 @@ with DAG('cc_pipeline_dag',
         bash_command='python /opt/airflow/scripts/load_links.py'
     )
 
-    # 4. + 5. + 6. + 7. + 8. + 9. (all transformations & metrics)
-    # For simplicity, group them in a single python script
-    # Or separate them into multiple tasks if you want more parallelization
     transform_and_analyze = BashOperator(
         task_id='transform_and_analyze',
-        bash_command='python /opt/airflow/dags/transform_and_analyze.py'
+        bash_command='python /opt/airflow/scripts/transform_and_analyze.py'
     )
 
     # 10. Save final results in Parquet

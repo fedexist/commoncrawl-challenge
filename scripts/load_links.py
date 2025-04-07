@@ -27,7 +27,7 @@ def load_links_via_copy(links_file: str | Path):
     # For a file that is simply one link per line, we can do:
     # "COPY external_links(link) FROM STDIN" expects the file lines to be valid for insertion.
     copy_sql = """
-        COPY external_links(url, link)
+        COPY external_links(link)
         FROM STDIN
         WITH (
             FORMAT csv,

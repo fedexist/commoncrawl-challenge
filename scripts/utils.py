@@ -1,48 +1,38 @@
 from typing import Tuple
 import requests
 import os
+import tldextract
+import polars as pl
 
-def is_homepage(source_url, link) -> Tuple[bool, str | None]:
+def is_homepage(link) -> Tuple[bool, str | None]:
     """
     Determines if the link points to the homepage of the same website as source_url.
     Returns a tuple: (is_homepage: bool, subsection: str | None)
     """
     from urllib.parse import urlparse
 
-    parsed_source = urlparse(source_url)
     parsed_link = urlparse(link)
-
-    # Check if same domain
-    if parsed_source.netloc != parsed_link.netloc:
-        return (False, None)  # External link
 
     # Check if it's the homepage
     if parsed_link.path in ["", "/"]:
         return (True, None)
 
     # It's a subsection or homepage of the same site
-    return (True, parsed_link.path)
+    return (False, parsed_link.path)
 
 
-def klazify_categorize(url_to_categorize: str, api_key: str):
+def get_site_category_from_api(url_to_categorize: str, api_key: str):
     """
-    Sends a POST request to Klazify to categorize the given URL.
+    Sends a POST request to WhoisXML API to categorize the given URL.
     
     :param url_to_categorize: The full URL you want to categorize
-    :param api_key: Your Klazify API key (Bearer token)
+    :param api_key: Your WhoisXML API key
     :return: The parsed JSON response from the API, or None if an error occurs
     """
-    endpoint = "https://www.klazify.com/api/categorize"
-    headers = {
-        "Accept": "application/json",
-        "Authorization": f"Bearer {api_key}",
-    }
-    data = {
-        "url": url_to_categorize
-    }
+    endpoint = " https://website-categorization.whoisxmlapi.com/api/v3"
     
     try:
-        response = requests.post(endpoint, headers=headers, data=data)
+        response = requests.get(endpoint, params={"apiKey": api_key, "url": url_to_categorize})
         response.raise_for_status()  # Raises an HTTPError if the status is 4xx or 5xx
         return response.json()       # Return the parsed JSON from the response
     except requests.exceptions.RequestException as e:
@@ -77,6 +67,51 @@ def is_ad_domain(domain: str, ad_domains: set) -> bool:
     """
     return domain.lower() in ad_domains
 
+def extract_domain(url: str) -> tldextract.tldextract.ExtractResult:
+    """
+    Extracts the domain from a given URL.
+    """
+    return tldextract.extract(url)
+
+def load_tlds_from_file(file_path: str = "data/tlds.csv") -> dict[str, str]:
+    """
+    Loads a list of TLDs from a file.
+    Each row may contain multiple TLDs separated by ";" mapped to a single country code.
+    """
+    df = pl.read_csv(file_path, truncate_ragged_lines=True)
+
+    tld_map = {}
+    for row in df.iter_rows(named=True):
+        tlds = row["tld"].split(";")
+        code = row["code"]
+        for tld in tlds:
+            tld_map[tld.strip()] = code
+
+    return tld_map    
+
+def extract_country(tld: str, mapping: dict) -> str | None:
+    """
+    Extracts the country code from the tld 
+    """
+    # This is a placeholder function. You might want to use a library or a mapping
+    # to get the country code from the TLD.
+    
+    if not mapping:
+        mapping = load_tlds_from_file()
+    
+    if "." in tld:
+        tld = tld.split(".")[-1]
+    
+    tld = tld.lower()
+    if tld in {"com", "org", "net"}:
+        return "US"
+
+    if not tld.startswith("."):
+        tld = "." + tld
+    
+    return mapping.get(tld, None)
+    
+
 def get_db_connection():
     """
     Placeholder function to get a database connection.
@@ -92,6 +127,76 @@ def get_db_connection():
     )
     return conn
 
+def compute_metrics(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Placeholder function to compute metrics from the DataFrame.
+    Replace with actual implementation.
+    """
+    total_count = df.height
+    
+    # 1. How many websites have we managed to categorize?
+    category_coverage = (
+        df.select(
+            (pl.col("category").is_not_null().sum() / df.height).alias("non_null_category_rate")
+        )
+    )
+    
+    # 2. How many links are there by category?
+    links_by_category = (
+        df.group_by("category")
+        .agg(pl.count().alias("link_count"))
+        .sort("link_count", descending=True)
+    )
+    
+    # 3. Top 10 countries
+    top_countries = (
+        df.group_by("country_code")
+        .agg(pl.count().alias("cnt"))
+        .sort("cnt", descending=True)
+        .head(10)
+    )
+    
+    # 4. Ratio of ad-based domains
+    ad_based_ratio = (
+        df.select(
+            (pl.col("is_ad_domain").sum() / total_count).alias("ad_domain_ratio")
+        )
+    )
+    
+    # 5. Ratio of ad-based domains by country
+    ad_domain_by_country = (
+        df.group_by("country_code")
+        .agg([
+            pl.count().alias("total"),
+            pl.col("is_ad_domain").sum().alias("ad_based")
+        ])
+        .with_columns(
+            (pl.col("ad_based") / pl.col("total")).alias("ad_based_ratio")
+        )
+        .select(["country_code", "ad_based_ratio"])
+    )
+    
+    metrics_df = pl.DataFrame({
+        "metric": [
+            "category_coverage",
+            "links_by_category",
+            "top_countries",
+            "ad_based_ratio",
+            "ad_domain_by_country"
+        ],
+        "value": [
+            category_coverage,
+            links_by_category,
+            top_countries,
+            ad_based_ratio,
+            ad_domain_by_country
+        ]
+    })
+    
+    return metrics_df
+    
+    
+    
 
 # Example usage:
 if __name__ == "__main__":

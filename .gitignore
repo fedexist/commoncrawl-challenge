@@ -7,7 +7,7 @@ __pycache__/
 *.db
 *.sqlite
 *.log
-*.csv
 *.tsv
 *.parquet
 logs/
+.env

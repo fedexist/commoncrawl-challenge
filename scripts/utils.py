@@ -204,9 +204,9 @@ def compute_metrics(df: pl.DataFrame) -> dict[str, pl.DataFrame]:
         .sort("link_count", descending=True)
     )
 
-    # 3. Top 10 countries
+    # 3. Top not US 10 countries
     top_countries = (
-        df.group_by("country_code")
+        df.filter(df["country_code"] != "US").group_by("country_code")
         .agg(pl.count().alias("cnt"))
         .sort("cnt", descending=True)
         .head(10)

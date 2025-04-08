@@ -117,7 +117,7 @@ def process_external_links():
 
     # Output to parquet
     print("Writing to parquet...")
-    df.write_parquet("output/external_links.parquet", partition_by=["country_code"])
+    df.write_parquet("output/external_links.parquet", partition_by=["country_code", "category"])
 
     for metric_name, metric_df in metrics_dict.items():
         # Save each metric DataFrame to a separate Parquet file

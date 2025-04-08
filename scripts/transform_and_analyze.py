@@ -1,7 +1,7 @@
 from utils import compute_metrics, extract_domain, get_site_category_from_api, is_ad_domain, is_homepage, get_db_connection, extract_country, load_ad_domains, load_tlds_from_file
 import polars as pl
 from urllib.parse import urlparse
-
+import os
 
 def add_is_homepage_flag(df: pl.DataFrame):
     results = [is_homepage(link) for link in df["link"]]
@@ -53,7 +53,8 @@ def add_country_codes(df: pl.DataFrame) -> pl.DataFrame:
     return df
 
 def add_categories_adbased_domain(df: pl.DataFrame):
-    # categories = [get_site_category_from_api(link) for link in df["primary_link"]]
+    # api_key = os.getenv("WHOIS_API_KEY")
+    # categories = [get_site_category_from_api(extract_domain(link).fqdn) for link in df["primary_link"]]
     categories = [None for link in df["primary_link"]] # Placeholder for actual API call
     df = df.with_columns(pl.Series("category", categories))
     # rows without categories will be checked for ad-based domains
@@ -104,4 +105,9 @@ def process_external_links():
 
 
 if __name__ == "__main__":
-    process_external_links()
+    # process_external_links()
+    
+    # Testing the API call
+    api_key = os.getenv("WHOIS_API_KEY")
+    category = get_site_category_from_api("www.google.com", api_key=api_key)
+    print(category)

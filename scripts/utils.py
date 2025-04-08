@@ -1,8 +1,10 @@
+from functools import lru_cache
 from typing import Tuple
 import requests
 import os
 import tldextract
 import polars as pl
+import json
 
 def is_homepage(link) -> Tuple[bool, str | None]:
     """
@@ -20,10 +22,47 @@ def is_homepage(link) -> Tuple[bool, str | None]:
     # It's a subsection or homepage of the same site
     return (False, parsed_link.path)
 
-
-def get_site_category_from_api(url_to_categorize: str, api_key: str):
+# TODO: use an actual cache to store the results from the API
+@lru_cache(maxsize=256)
+def get_site_category_from_api(url_to_categorize: str, api_key: str) -> str:
     """
     Sends a POST request to WhoisXML API to categorize the given URL.
+    
+    The response from the API is something like:
+    
+    {
+        "as": {
+            "asn": 54113,
+            "domain": "https://www.fastly.com",
+            "name": "FASTLY",
+            "route": "151.101.128.0/22",
+            "type": "Content"
+        },
+        "domainName": "cnn.com",
+        "categories": [
+            {
+                "confidence": 1,
+                "id": 379,
+                "name": "News and Politics"
+            },
+            {
+                "confidence": 0.95,
+                "id": 382,
+                "name": "International News"
+            },
+            {
+                "confidence": 0.98,
+                "id": 385,
+                "name": "National News"
+            },
+            ...
+        ],
+        "createdDate": "1993-09-22T04:00:00+00:00",
+        "websiteResponded": true,
+        "apiVersion": "v3"
+    }
+    
+    The function will return the category with the highest confidence score.    
     
     :param url_to_categorize: The full URL you want to categorize
     :param api_key: Your WhoisXML API key
@@ -33,10 +72,16 @@ def get_site_category_from_api(url_to_categorize: str, api_key: str):
     
     try:
         response = requests.get(endpoint, params={"apiKey": api_key, "url": url_to_categorize})
-        response.raise_for_status()  # Raises an HTTPError if the status is 4xx or 5xx
-        return response.json()       # Return the parsed JSON from the response
-    except requests.exceptions.RequestException as e:
-        print(f"Request to Klazify failed: {e}")
+        response.raise_for_status()
+        response_dict: dict = response.json()
+        categories = response_dict.get("categories", None)
+        if not categories:
+            return None
+        
+        category = sorted(categories, key=lambda x: x["confidence"], reverse=True)[0]
+        return category["name"] if category else None
+    except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
+        print(f"Request to WhoisXML failed: {e}")
         return None
 
 def load_ad_domains(hosts_file_path: str = "data/hosts") -> set:

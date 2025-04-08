@@ -8,6 +8,8 @@ default_args = {
     'catchup': False,
 }
 
+cwd = '/opt/airflow/'
+
 with DAG('cc_pipeline_dag', 
          default_args=default_args, 
          schedule_interval=None,
@@ -19,30 +21,36 @@ with DAG('cc_pipeline_dag',
     # 1. Download segments
     download_segments = BashOperator(
         task_id='download_segments',
-        bash_command='bash /opt/airflow/scripts/download_segments.sh {{ dag_run.conf["year"] }}-{{ dag_run.conf["week"] }}'
+        bash_command='bash /opt/airflow/scripts/download_segments.sh {{ dag_run.conf["year"] }}-{{ dag_run.conf["week"] }}',
+        cwd=cwd,
     )
 
     # 2. Extract links
     extract_links = BashOperator(
         task_id='extract_links',
-        bash_command='python /opt/airflow/scripts/extract_links.py'
+        bash_command='python /opt/airflow/scripts/read_warc_async.py',
+        env={
+            "SEGMENTS_FOLDER": "/opt/airflow/commoncrawl/segments",
+            "MAX_LINKS_PER_FILE": "100000",
+        },
+        cwd=cwd,
     )
 
     # 3. Load links to PostgreSQL
     load_links = BashOperator(
         task_id='load_links',
-        bash_command='python /opt/airflow/scripts/load_links.py'
+        bash_command='python /opt/airflow/scripts/load_links.py',
+        cwd=cwd,
+        env={
+            "POSTGRES_HOST": "postgres",
+        },
     )
 
+    # 4. Process the links and save to parquet
     transform_and_analyze = BashOperator(
         task_id='transform_and_analyze',
-        bash_command='python /opt/airflow/scripts/transform_and_analyze.py'
+        bash_command='python /opt/airflow/scripts/transform_and_analyze.py',
+        cwd=cwd,
     )
 
-    # 10. Save final results in Parquet
-    save_parquet = BashOperator(
-        task_id='save_parquet',
-        bash_command='python /opt/airflow/dags/save_partitioned_parquet.py'
-    )
-
-    download_segments >> extract_links >> load_links >> transform_and_analyze >> save_parquet
+    download_segments >> extract_links >> load_links >> transform_and_analyze

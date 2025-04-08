@@ -27,13 +27,19 @@ def load_links_via_copy(links_file: str | Path):
     # For a file that is simply one link per line, we can do:
     # "COPY external_links(link) FROM STDIN" expects the file lines to be valid for insertion.
     copy_sql = """
-        COPY external_links(link)
+        CREATE TEMP TABLE external_links_staging (
+            link TEXT
+        );
+        COPY external_links_staging(link)
         FROM STDIN
         WITH (
             FORMAT csv,
             DELIMITER E',',
-            QUOTE E'\x07'
+            QUOTE E'\x22'
         );
+        INSERT INTO external_links(link)
+        SELECT link FROM external_links_staging
+        WHERE link IS NOT NULL;
     """
 
     # Alternatively, you might do a simpler "COPY ... FROM STDIN WITH DELIMITER '\n';"

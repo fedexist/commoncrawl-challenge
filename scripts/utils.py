@@ -118,16 +118,17 @@ def get_db_connection():
     Replace with actual implementation.
     """
     import psycopg2
+    import os
     conn = psycopg2.connect(
-        dbname="cc_db",
-        user="cc_user",
-        password="cc_pass",
-        host="localhost",
-        port=5432
+        dbname=os.getenv("POSTGRES_DB", "cc_db"),
+        user=os.getenv("POSTGRES_USER", "cc_user"), 
+        password=os.getenv("POSTGRES_PASSWORD", "cc_pass"),
+        host=os.getenv("POSTGRES_HOST", "localhost"),
+        port=int(os.getenv("POSTGRES_PORT", 5432))
     )
     return conn
 
-def compute_metrics(df: pl.DataFrame) -> pl.DataFrame:
+def compute_metrics(df: pl.DataFrame) -> dict[str, pl.DataFrame]:
     """
     Placeholder function to compute metrics from the DataFrame.
     Replace with actual implementation.
@@ -175,25 +176,14 @@ def compute_metrics(df: pl.DataFrame) -> pl.DataFrame:
         )
         .select(["country_code", "ad_based_ratio"])
     )
-    
-    metrics_df = pl.DataFrame({
-        "metric": [
-            "category_coverage",
-            "links_by_category",
-            "top_countries",
-            "ad_based_ratio",
-            "ad_domain_by_country"
-        ],
-        "value": [
-            category_coverage,
-            links_by_category,
-            top_countries,
-            ad_based_ratio,
-            ad_domain_by_country
-        ]
-    })
-    
-    return metrics_df
+        
+    return {
+           "category_coverage": category_coverage,
+            "links_by_category": links_by_category,
+            "top_countries": top_countries,
+            "ad_based_ratio": ad_based_ratio,
+            "ad_domain_by_country": ad_domain_by_country
+    }
     
     
     

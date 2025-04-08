@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import AsyncGenerator
 from warcio.archiveiterator import ArchiveIterator
 from bs4 import BeautifulSoup
+import urllib.parse
 
 async def generate_links(file_path: Path, limit: int = None) -> AsyncGenerator[str, None]:
     """
@@ -57,6 +58,17 @@ async def write_links_to_file(queue: asyncio.Queue, output_file: Path):
     async with aiofiles.open(output_file, 'w') as afp:
         while True:
             link = await queue.get()  # blocks until an item is available
+            
+            if link == "":
+                queue.task_done()
+            
+            link = urllib.parse.quote_plus(link)  # URL-encode the link
+            
+            if "\"" in link:
+                link = link.replace("\"", "%22")
+            if "," in link:
+                link = f"\"{link}\""  # Escape commas in links
+            
             await afp.write(link + "\n")
             queue.task_done()
 

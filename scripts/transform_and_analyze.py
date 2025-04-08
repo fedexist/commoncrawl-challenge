@@ -88,12 +88,15 @@ def process_external_links():
     
     # Compute the metrics, more details about them inside
     print("Computing metrics...")
-    metrics = compute_metrics(df)
+    metrics_dict = compute_metrics(df)
     
     # Output to parquet
     print("Writing to parquet...")
     df.write_parquet("output/external_links.parquet", partition_by=["country_code"])
-    metrics.write_parquet("output/metrics.parquet")
+    
+    for metric_name, metric_df in metrics_dict.items():
+        # Save each metric DataFrame to a separate Parquet file
+        metric_df.write_parquet(f"output/{metric_name}.parquet")
     
     conn.close()
     

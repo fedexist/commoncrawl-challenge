@@ -556,7 +556,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiofiles", specifier = ">=24.1.0" },
-    { name = "apache-airflow", specifier = ">=2.10.5" },
+    { name = "apache-airflow", specifier = "==2.10.5" },
     { name = "beautifulsoup4", specifier = ">=4.13.3" },
     { name = "polars", specifier = ">=1.26.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.10" },

@@ -1,4 +1,3 @@
-version: '3'
 services:
   postgres:
     image: postgres:15
@@ -13,8 +12,12 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   airflow:
-    image: apache/airflow:2.5.1
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
     container_name: airflow_container
+    env_file:
+      - airflow.env
     depends_on:
       - postgres
     environment:
@@ -25,6 +28,9 @@ services:
       - ./scripts:/opt/airflow/scripts
       - ./logs:/opt/airflow/logs
       - ./commoncrawl:/opt/airflow/commoncrawl
+      - ./output:/opt/airflow/output
+      - ./data:/opt/airflow/data
+      - ./sql:/opt/airflow/sql
     ports:
       - "8080:8080"
     command: >

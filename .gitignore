@@ -11,3 +11,4 @@ __pycache__/
 *.parquet
 logs/
 .env
+airflow.env

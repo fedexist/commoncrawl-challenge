@@ -127,9 +127,9 @@ def process_external_links():
 
 
 if __name__ == "__main__":
-    # process_external_links()
+    process_external_links()
 
     # Testing the API call
-    api_key = os.getenv("WHOIS_API_KEY")
-    category = get_site_category_from_api("www.google.com", api_key=api_key)
-    print(category)
+    # api_key = os.getenv("WHOIS_API_KEY")
+    # category = get_site_category_from_api("www.google.com", api_key=api_key)
+    # print(category)

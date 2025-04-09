@@ -1,7 +1,8 @@
+import asyncio
 from utils import (
     compute_metrics,
     extract_domain,
-    get_site_category_from_api,
+    get_all_categories,
     is_ad_domain,
     is_homepage,
     get_db_connection,
@@ -72,27 +73,40 @@ def add_country_codes(df: pl.DataFrame) -> pl.DataFrame:
     return df
 
 
-def add_categories_adbased_domain(df: pl.DataFrame):
-    # api_key = os.getenv("WHOIS_API_KEY")
-    # categories = [get_site_category_from_api(extract_domain(link).fqdn) for link in df["primary_link"]]
-    categories = [
-        None for link in df["primary_link"]
-    ]  # Placeholder for actual API call
-    df = df.with_columns(pl.Series("category", categories))
-    # rows without categories will be checked for ad-based domains
-    null_category_df = df.filter(pl.col("category").is_null())
+def add_categories_adbased_domain(df: pl.DataFrame) -> pl.DataFrame:
+    api_key = os.getenv("WHOIS_API_KEY")
+    if not api_key:
+        raise ValueError("Missing WHOIS_API_KEY")
+
     ad_domains = load_ad_domains()
-    ad_domains_df = null_category_df.select("primary_link").with_columns(
-        pl.Series(
-            "is_ad_domain",
-            [is_ad_domain(link, ad_domains) for link in df["primary_link"]],
-        )
+
+    # Extract unique domains to categorize
+    primary_links = df["primary_link"].to_list()
+    unique_domains = list({extract_domain(link).fqdn for link in primary_links})
+
+    # Run categorization concurrently
+    domain_to_category = asyncio.run(get_all_categories(unique_domains, api_key))
+
+    # Map categories to links
+    categories = [
+        domain_to_category.get(extract_domain(link).fqdn)
+        for link in primary_links
+    ]
+    df = df.with_columns(pl.Series("category", categories))
+
+    # Check ad domain flag for links with missing category
+    null_category_df = df.filter(pl.col("category").is_null())
+    is_ad_flags = [
+        is_ad_domain(link, ad_domains)
+        for link in null_category_df["primary_link"]
+    ]
+    df = df.join(
+        null_category_df.with_columns(pl.Series("is_ad_domain", is_ad_flags)),
+        on="primary_link",
+        how="left"
     )
 
-    df = df.join(ad_domains_df, on="primary_link", how="left")
-
     return df
-
 
 def process_external_links():
     conn = get_db_connection()

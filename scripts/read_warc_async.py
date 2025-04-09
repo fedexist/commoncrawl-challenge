@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import AsyncGenerator
 from warcio.archiveiterator import ArchiveIterator
 from bs4 import BeautifulSoup
-import urllib.parse
 
+from utils import clean_link, encode_url_path_only
+
+SHUTDOWN = object()
 
 async def generate_links(
     file_path: Path, limit: int = None
@@ -47,42 +49,90 @@ async def generate_links(
 
 
 async def read_warc_and_enqueue(
-    file_path: Path, max_links_per_file: int, queue: asyncio.Queue
+    file_path: Path,
+    max_links_per_file: int,
+    queue: asyncio.Queue,
+    batch_size: int = 10000,
+):
+    print(f"📥 Start reading {file_path.name}")
+    buffer = []
+    count = 0
+
+    async for link in generate_links(file_path, max_links_per_file):
+        buffer.append(link)
+        count += 1
+
+        if len(buffer) >= batch_size:
+            await queue.put(buffer.copy())  # put batch
+            buffer.clear()
+
+    if buffer:
+        await queue.put(buffer.copy())
+
+    print(f"✅ Enqueued {count} links from {file_path.name}")
+
+
+async def write_links_to_file(
+    queue: asyncio.Queue,
+    output_file: Path,
+    writer_id: int,
+    flush_interval: float = 10.0
 ):
     """
-    Reads links from a single WARC file (async generator),
-    and puts them on the queue for the writer to consume.
+    Each writer reads links from the queue and writes them in batches to its own 'output_file'.
+    Links are URL-encoded and comma-escaped. Writers exit cleanly on SHUTDOWN sentinel.
     """
-    async for link in generate_links(file_path, max_links_per_file):
-        # Put each link on the queue as soon as we find it
-        await queue.put(link)
+    print(f"📝 Writer {writer_id} started, writing to {output_file}")
+    buffer = []
+    last_flush = asyncio.get_event_loop().time()
 
-
-async def write_links_to_file(queue: asyncio.Queue, output_file: Path):
-    """
-    Continuously reads links from the queue and writes them to 'output_file'.
-    This runs until cancelled (when all producers are finished and queue is empty).
-    """
-    print(f"Printer task started, writing to {output_file}")
-    async with aiofiles.open(output_file, "w") as afp:
+    async with aiofiles.open(output_file, 'w') as afp:
         while True:
-            link = await queue.get()  # blocks until an item is available
+            try:
+                await asyncio.sleep(0.01)
+                # Try to get a new link with timeout to trigger flush
+                link_batch = await asyncio.wait_for(queue.get(), timeout=flush_interval)
+            except asyncio.TimeoutError:
+                # Time-based flush (if idle)
+                if buffer:
+                    await afp.writelines(buffer)
+                    await afp.flush()
+                    print(f"🌀 Writer {writer_id}: Flushed {len(buffer)} links (timeout)")
+                    buffer.clear()
+                    last_flush = asyncio.get_event_loop().time()
+                continue
 
-            if link == "":
+            try:
+                if link_batch is SHUTDOWN:
+                    # Final flush before shutdown
+                    if buffer:
+                        await afp.writelines(buffer)
+                        await afp.flush()
+                        print(f"✅ Writer {writer_id}: Final flush of {len(buffer)} links on shutdown")
+                        buffer.clear()
+                    print(f"🛑 Writer {writer_id} exiting.")
+                    break
+
+                # Process link
+                cleaned_links = [clean_link(link) for link in link_batch]
+                links_from_batch = [link + "\n" for link in cleaned_links if link]
+                buffer.extend(links_from_batch)
+
+                # Batch flush
+                now = asyncio.get_event_loop().time()
+                if len(buffer) >= 100 or (now - last_flush) >= flush_interval:
+                    await afp.writelines(buffer)
+                    await afp.flush()
+                    # print(f"🚀 Writer {writer_id}: Flushed {len(buffer)} links")
+                    buffer.clear()
+                    last_flush = now
+
+            finally:
                 queue.task_done()
 
-            link = urllib.parse.quote_plus(link)  # URL-encode the link
-
-            if '"' in link:
-                link = link.replace('"', "%22")
-            if "," in link:
-                link = f'"{link}"'  # Escape commas in links
-
-            await afp.write(link + "\n")
-            queue.task_done()
-
-
 async def main(segments_folder: str | Path):
+    
+    NUM_WRITERS = min(32, os.cpu_count() + 4)
     segments_folder = Path(segments_folder)
     warc_files = list(segments_folder.glob("*.warc.gz"))
 
@@ -109,9 +159,12 @@ async def main(segments_folder: str | Path):
     # Create a queue to pass links from multiple WARC readers to the file writer
     queue = asyncio.Queue()
 
-    # Create a writer task (consumer)
-    writer_task = asyncio.create_task(write_links_to_file(queue, output_file))
-
+    # Create n writer tasks (consumers)
+    writer_tasks = [
+        asyncio.create_task(write_links_to_file(queue, segments_folder / f"extracted_links.{i}.txt", i))
+        for i in range(NUM_WRITERS)
+    ]
+    
     # Create producer tasks to parse each WARC file in parallel
     tasks = []
     for file_path in warc_files:
@@ -123,15 +176,35 @@ async def main(segments_folder: str | Path):
 
     # Wait for all WARC parsing tasks to finish
     await asyncio.gather(*tasks)
+    print("✅ All WARC parsing tasks finished.")
 
-    # Wait for the queue to be fully processed (all links written)
+    # Wait for the queue to be fully processed
+    print(f"📦 Queue size before join: {queue.qsize()}")
     await queue.join()
+    print("✅ Queue fully drained")
+    
+    # Send one shutdown signal per writer
+    for _ in range(NUM_WRITERS):
+        await queue.put(SHUTDOWN)
+    print("✅ Sentinels sent to writers.")
 
-    # Cancel the writer task (it has a while True loop)
-    writer_task.cancel()
-
-    print(f"Links successfully written to {output_file}")
-
+    # Wait for all writers to exit
+    await asyncio.gather(*writer_tasks)
+    print("✅ All writers exited.")
+    
+    # Join the output files into one
+    print(f"📦 Merging output files into {output_file}")
+    
+    async with aiofiles.open(output_file, 'w') as afp:
+        for i in range(NUM_WRITERS):
+            writer_file = segments_folder / f"extracted_links.{i}.txt"
+            async with aiofiles.open(writer_file, 'r') as writer_afp:
+                async for line in writer_afp:
+                    await afp.write(line)
+            os.remove(writer_file)
+    print("✅ Merged all output files.")
+    print(f"✅ All links written to {output_file}")
+    
 
 if __name__ == "__main__":
     segments_folder = os.getenv("SEGMENTS_FOLDER")

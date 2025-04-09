@@ -1,10 +1,27 @@
 from functools import lru_cache
 from typing import Tuple
-import requests
+from urllib.parse import quote, urlparse, urlunparse
+import aiohttp
+import asyncio
 import os
 import tldextract
 import polars as pl
 import json
+
+from diskcache import Cache
+cache = Cache("site-category-cache")
+
+
+async def get_all_categories(domains: list[str], api_key: str, max_concurrent: int = 10) -> dict[str, str | None]:
+    """
+    Concurrently fetch categories for a list of domains.
+    Returns a dictionary: domain -> category
+    """
+    connector = aiohttp.TCPConnector(limit=max_concurrent)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        tasks = [get_site_category_from_api(session, domain, api_key) for domain in domains]
+        results = await asyncio.gather(*tasks)
+        return dict(results)
 
 
 def is_homepage(link) -> Tuple[bool, str | None]:
@@ -25,8 +42,7 @@ def is_homepage(link) -> Tuple[bool, str | None]:
 
 
 # TODO: use an actual cache to store the results from the API
-@lru_cache(maxsize=256)
-def get_site_category_from_api(url_to_categorize: str, api_key: str) -> str:
+async def get_site_category_from_api(session: aiohttp.ClientSession, domain: str, api_key: str) -> tuple[str, str | None]:    
     """
     Sends a POST request to WhoisXML API to categorize the given URL.
 
@@ -70,23 +86,25 @@ def get_site_category_from_api(url_to_categorize: str, api_key: str) -> str:
     :param api_key: Your WhoisXML API key
     :return: The parsed JSON response from the API, or None if an error occurs
     """
-    endpoint = " https://website-categorization.whoisxmlapi.com/api/v3"
+    if domain in cache:
+        return domain, cache[domain]
 
+    endpoint = "https://website-categorization.whoisxmlapi.com/api/v3"
     try:
-        response = requests.get(
-            endpoint, params={"apiKey": api_key, "url": url_to_categorize}
-        )
-        response.raise_for_status()
-        response_dict: dict = response.json()
-        categories = response_dict.get("categories", None)
-        if not categories:
-            return None
-
-        category = sorted(categories, key=lambda x: x["confidence"], reverse=True)[0]
-        return category["name"] if category else None
-    except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
-        print(f"Request to WhoisXML failed: {e}")
-        return None
+        async with session.get(endpoint, params={"apiKey": api_key, "url": domain}, timeout=10) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+            categories = data.get("categories", [])
+            if categories:
+                best = max(categories, key=lambda x: x["confidence"])
+                category = best["name"]
+                cache[domain] = category
+                return domain, category
+    except Exception as e:
+        print(f"❌ Error for domain '{domain}': {e}")
+    
+    cache[domain] = None
+    return domain, None
 
 
 def load_ad_domains(hosts_file_path: str = "data/hosts") -> set:
@@ -181,6 +199,38 @@ def get_db_connection():
         port=int(os.getenv("POSTGRES_PORT", 5432)),
     )
     return conn
+
+def encode_url_path_only(url) -> str | None:
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        # the url is invalid
+        return None
+        
+    encoded_path = quote(parsed.path)
+    encoded_url = urlunparse((
+            parsed.scheme,
+            parsed.netloc,
+            encoded_path,
+            parsed.params,
+            parsed.query,
+            parsed.fragment
+    ))
+    # Fallback to the original URL if encoding fails
+    return encoded_url
+
+def clean_link(link: str) -> str:
+    """
+    Cleans the link by removing unwanted characters and encoding the URL path.
+    """
+    # Remove unwanted characters
+    link = link.strip().replace("\n", "").replace("\r", "")
+    if "\"" in link:
+        link = link.replace("\"", "")
+    if "," in link:
+        link = f"\"{link}\""
+    # Encode the URL path
+    return link # encode_url_path_only(link)
 
 
 def compute_metrics(df: pl.DataFrame) -> dict[str, pl.DataFrame]:

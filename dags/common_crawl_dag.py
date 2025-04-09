@@ -27,8 +27,7 @@ with DAG(
         task_id="extract_links",
         bash_command="python /opt/airflow/scripts/read_warc_async.py",
         env={
-            "SEGMENTS_FOLDER": "/opt/airflow/commoncrawl/segments",
-            "MAX_LINKS_PER_FILE": "100000",
+            "SEGMENTS_FOLDER": "/opt/airflow/commoncrawl/segments"
         },
         cwd=cwd,
     )

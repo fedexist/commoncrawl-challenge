@@ -11,5 +11,12 @@ install-local:
 db:
 	docker-compose up -d postgres
 
-run-airflow:
+prepare:
+	@echo "Creating and fixing permissions for bind-mounts..."
+	sudo mkdir -p /tmp/commoncrawl
+	sudo chown -R $(shell id -u):$(shell id -g) /tmp/commoncrawl
+
+run-airflow: prepare
+	@echo "Exporting UID..."
+	export UID=$(shell id -u) && \
 	docker-compose up -d --build --force-recreate

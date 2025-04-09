@@ -1,9 +1,14 @@
 FROM apache/airflow:slim-2.10.5-python3.12
 
+ARG UID=50000
+ARG GID=50000
+
 USER root
 
 RUN apt-get update -y && \
     apt-get install -y wget gzip
+
+RUN usermod -u ${UID} -g 0 airflow
 
 USER airflow
 WORKDIR /home/airflow

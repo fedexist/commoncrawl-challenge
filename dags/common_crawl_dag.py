@@ -39,6 +39,7 @@ with DAG(
         cwd=cwd,
         env={
             "POSTGRES_HOST": "postgres",
+            "SEGMENTS_FOLDER": "/opt/airflow/commoncrawl/segments"
         },
     )
 

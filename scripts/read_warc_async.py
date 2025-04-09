@@ -9,7 +9,7 @@ from warcio.archiveiterator import ArchiveIterator
 from warcio.recordloader import ArcWarcRecord
 from bs4 import BeautifulSoup
 
-from utils import clean_link, encode_url_path_only
+from utils import clean_link, encode_url_path_only, extract_links_sync
 
 SHUTDOWN = object()
 
@@ -56,40 +56,39 @@ async def generate_links_from_record(record: ArcWarcRecord, limit: int = None) -
 
 
 async def generate_links(
-    file_path: Path, limit: int = None
+    file_path: Path,
+    limit: int = None,
+    executor: ThreadPoolExecutor = None,
 ) -> AsyncGenerator[str, None]:
     """
     Asynchronously reads a WARC file, parses HTML content,
-    and yields links one by one.
+    and yields links one by one. HTML parsing is offloaded to a thread.
     """
-    # Read file (gzipped WARC) asynchronously into memory.
-    # For very large files, consider a streaming approach, but warcio
-    # typically expects a synchronous file-like object in one piece.
     async with aiofiles.open(file_path, "rb") as afp:
         warc_bytes = await afp.read()
 
-    # Convert the bytes to a BytesIO for warcio's ArchiveIterator
     count = 0
+    loop = asyncio.get_event_loop()
+
     with io.BytesIO(warc_bytes) as warc_stream:
         for record in ArchiveIterator(warc_stream):
             if record.rec_type == "response":
                 content_type = record.http_headers.get("Content-Type", "")
                 source_url = record.rec_headers.get("WARC-Target-URI", "")
                 yield source_url
+
                 if "text/html" in content_type.lower():
                     html_content = record.content_stream().read()
                     html_str = html_content.decode("utf-8", errors="replace")
 
-                    soup = BeautifulSoup(html_str, "html.parser")
-                    for a_tag in soup.find_all("a", href=True):
-                        is_valid_link = a_tag["href"].startswith(
-                            ("http://", "https://")
-                        ) and a_tag["href"] not in {"http://", "https://"}
-                        if is_valid_link:
-                            count += 1
-                            yield a_tag["href"]
-                            if limit and count >= limit:
-                                return
+                    # ✅ Parse links in background thread
+                    links = await loop.run_in_executor(executor, extract_links_sync, html_str)
+
+                    for link in links:
+                        yield link
+                        count += 1
+                        if limit and count >= limit:
+                            return
 
 async def read_warc_and_enqueue_generated(
     file_path: Path,
@@ -145,13 +144,20 @@ async def read_warc_and_enqueue(
     file_path: Path,
     max_links_per_file: int,
     queue: asyncio.Queue,
+    executor: ThreadPoolExecutor,
     batch_size: int = 10000,
 ):
+    """
+    Reads a WARC file, parses HTML content, and enqueues links in batches.
+    Uses a thread pool executor for HTML parsing to avoid blocking the event loop.
+    Each file is processed in parallel, and links are enqueued in batches.
+    The queue is used to pass links to the writer tasks.
+    """
     print(f"📥 Start reading {file_path.name}")
     buffer = []
     count = 0
 
-    async for link in generate_links(file_path, max_links_per_file):
+    async for link in generate_links(file_path, max_links_per_file, executor):
         buffer.append(link)
         count += 1
 
@@ -231,7 +237,7 @@ async def main(segments_folder: str | Path):
     segments_folder = Path(segments_folder)
     warc_files = list(segments_folder.glob("*.warc.gz"))
 
-    max_links_per_file = os.getenv("MAX_LINKS_PER_FILE")
+    max_links_per_file = None # os.getenv("MAX_LINKS_PER_FILE")
     if max_links_per_file:
         try:
             max_links_per_file = int(max_links_per_file)
@@ -261,14 +267,13 @@ async def main(segments_folder: str | Path):
     ]
     
     # Create producer tasks to parse each WARC file in parallel
-    tasks = []
-    for file_path in warc_files:
-        tasks.append(
-            asyncio.create_task(
-                read_warc_and_enqueue(file_path, max_links_per_file, queue)
-            )
+    tasks = [
+        asyncio.create_task(
+            read_warc_and_enqueue(file_path, max_links_per_file, queue, executor)
         )
-
+        for file_path in warc_files
+    ]
+    
     # Wait for all WARC parsing tasks to finish
     await asyncio.gather(*tasks)
     print("✅ All WARC parsing tasks finished.")
@@ -291,6 +296,7 @@ async def main(segments_folder: str | Path):
     
     # Join the output files into one
     print(f"📦 Merging output files into {output_file}")
+    executor.shutdown(wait=True)
     
     await merge_files_parallel(output_file, segments_folder, NUM_WRITERS)
     

@@ -6,6 +6,7 @@
 
 * Make sure you have at least Python 3.12 installed
 * Install [uv](https://docs.astral.sh/uv/getting-started/installation/), if you don't have it on your system, since it's used as package manager for this project.
+* docker-compose
 
 ### Setup
 

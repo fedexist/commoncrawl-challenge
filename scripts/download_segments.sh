@@ -20,7 +20,7 @@ WARC_PATH_URL="https://data.commoncrawl.org/crawl-data/CC-MAIN-${PARTITION}/warc
 
 SEGMENT_BASE_URL="https://data.commoncrawl.org/"
 
-OUTPUT_DIR="./commoncrawl"
+OUTPUT_DIR="/opt/airflow/commoncrawl"
 
 mkdir -p "${OUTPUT_DIR}/segments"
 

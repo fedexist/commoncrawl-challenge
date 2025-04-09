@@ -1,15 +1,59 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import os
 import aiofiles
 import io
 from pathlib import Path
 from typing import AsyncGenerator
 from warcio.archiveiterator import ArchiveIterator
+from warcio.recordloader import ArcWarcRecord
 from bs4 import BeautifulSoup
 
 from utils import clean_link, encode_url_path_only
 
 SHUTDOWN = object()
+
+async def generate_records(file_path: Path) -> AsyncGenerator[ArcWarcRecord, None]:
+    """
+    Asynchronously reads a WARC file and yields records one by one.
+    """
+    # Read file (gzipped WARC) asynchronously into memory.
+    # For very large files, consider a streaming approach, but warcio
+    # typically expects a synchronous file-like object in one piece.
+    async with aiofiles.open(file_path, "rb") as afp:
+        warc_bytes = await afp.read()
+
+    # Convert the bytes to a BytesIO for warcio's ArchiveIterator
+    with io.BytesIO(warc_bytes) as warc_stream:
+        for record in ArchiveIterator(warc_stream):
+            yield record
+
+async def generate_links_from_record(record: ArcWarcRecord, limit: int = None) -> AsyncGenerator[str, None]:
+    """
+    Asynchronously parses HTML content from a WARC record
+    and yields links one by one.
+    """
+    count = 0
+    if record.rec_type == "response":
+        content_type = record.http_headers.get("Content-Type", "")
+        source_url = record.rec_headers.get("WARC-Target-URI", "")
+        yield source_url
+        if "text/html" in content_type.lower():
+            html_content = record.content_stream().read()
+            html_str = html_content.decode("utf-8", errors="replace")
+
+            soup = BeautifulSoup(html_str, "html.parser")
+            for a_tag in soup.find_all("a", href=True):
+                is_valid_link = a_tag["href"].startswith(
+                            ("http://", "https://")
+                        ) and a_tag["href"] not in {"http://", "https://"}
+                if is_valid_link:
+                    count += 1
+                    yield a_tag["href"]
+                    if limit and count >= limit:
+                        print(f"🔗 Yielded {count} links from record")
+                        return
+
 
 async def generate_links(
     file_path: Path, limit: int = None
@@ -47,6 +91,55 @@ async def generate_links(
                             if limit and count >= limit:
                                 return
 
+async def read_warc_and_enqueue_generated(
+    file_path: Path,
+    max_links_per_file: int,
+    queue: asyncio.Queue,
+    batch_size: int = 10000,
+):
+    print(f"📥 Start reading {file_path.name}")
+    buffer = []
+    count = 0
+
+    async for record in generate_records(file_path):
+        async for link in generate_links_from_record(record, max_links_per_file):
+            buffer.append(link)
+            count += 1
+
+            if len(buffer) >= batch_size:
+                await queue.put(buffer.copy())  # put batch
+                print(f"📤 Put batch of {len(buffer)} links on queue from {file_path.name}")
+                buffer.clear()
+
+
+        if buffer:
+            await queue.put(buffer.copy())
+
+    print(f"✅ Enqueued {count} links from {file_path.name}")
+
+
+async def read_file(writer_file):
+    async with aiofiles.open(writer_file, 'r') as reader:
+        contents = await reader.read()
+    return writer_file, contents
+
+async def merge_files_parallel(output_file, segments_folder, num_writers):
+    tasks = []
+    for i in range(num_writers):
+        writer_file = segments_folder / f"extracted_links.{i}.txt"
+        tasks.append(read_file(writer_file))
+
+    # Concurrently read all files
+    file_data = await asyncio.gather(*tasks)
+
+    # Write contents to output file
+    async with aiofiles.open(output_file, 'w') as afp:
+        for _, content in file_data:
+            await afp.write(content)
+
+    # Delete the files after writing
+    for writer_file, _ in file_data:
+        os.remove(writer_file)
 
 async def read_warc_and_enqueue(
     file_path: Path,
@@ -133,6 +226,8 @@ async def write_links_to_file(
 async def main(segments_folder: str | Path):
     
     NUM_WRITERS = min(32, os.cpu_count() + 4)
+    
+    executor = ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
     segments_folder = Path(segments_folder)
     warc_files = list(segments_folder.glob("*.warc.gz"))
 
@@ -192,16 +287,20 @@ async def main(segments_folder: str | Path):
     await asyncio.gather(*writer_tasks)
     print("✅ All writers exited.")
     
+    # Wed Apr  9 15:46:44 CEST 2025
+    
     # Join the output files into one
     print(f"📦 Merging output files into {output_file}")
     
-    async with aiofiles.open(output_file, 'w') as afp:
-        for i in range(NUM_WRITERS):
-            writer_file = segments_folder / f"extracted_links.{i}.txt"
-            async with aiofiles.open(writer_file, 'r') as writer_afp:
-                async for line in writer_afp:
-                    await afp.write(line)
-            os.remove(writer_file)
+    await merge_files_parallel(output_file, segments_folder, NUM_WRITERS)
+    
+    # async with aiofiles.open(output_file, 'w') as afp:
+    #     for i in range(NUM_WRITERS):
+    #         writer_file = segments_folder / f"extracted_links.{i}.txt"
+    #         async with aiofiles.open(writer_file, 'r') as writer_afp:
+    #             async for line in writer_afp:
+    #                 await afp.write(line)
+    #         os.remove(writer_file)
     print("✅ Merged all output files.")
     print(f"✅ All links written to {output_file}")
     

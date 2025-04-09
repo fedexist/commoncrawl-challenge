@@ -10,6 +10,7 @@ dependencies = [
     "apache-airflow==2.10.5",
     "beautifulsoup4>=4.13.3",
     "diskcache>=5.6.3",
+    "dotenv>=0.9.9",
     "polars>=1.26.0",
     "psycopg2-binary>=2.9.10",
     "requests>=2.32.3",

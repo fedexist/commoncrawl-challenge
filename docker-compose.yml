@@ -27,7 +27,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./scripts:/opt/airflow/scripts
       - ./logs:/opt/airflow/logs
-      - ./commoncrawl:/opt/airflow/commoncrawl
+      - /tmp/commoncrawl:/opt/airflow/commoncrawl
       - ./output:/opt/airflow/output
       - ./data:/opt/airflow/data
       - ./sql:/opt/airflow/sql

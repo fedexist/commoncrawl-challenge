@@ -1,3 +1,4 @@
+import os
 from utils import get_db_connection
 
 from pathlib import Path
@@ -53,5 +54,9 @@ def load_links_via_copy(links_file: str | Path):
 
 
 if __name__ == "__main__":
-    links_file = "commoncrawl/segments/extracted_links.txt"  # Path to the file containing extracted links
+    segments_folder = os.getenv("SEGMENTS_FOLDER")
+    if not segments_folder:
+        print("Please set the SEGMENTS_FOLDER environment variable.")
+        exit(1)
+    links_file = os.path.join(segments_folder, "extracted_links.txt")
     load_links_via_copy(links_file)

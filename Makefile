@@ -8,5 +8,8 @@ install-local:
 	uv venv
 	uv sync
 
-run:
-	docker-compose up -d
+db:
+	docker-compose up -d postgres
+
+run-airflow:
+	docker-compose up -d --build --force-recreate

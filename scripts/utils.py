@@ -4,6 +4,7 @@ from urllib.parse import quote, urlparse, urlunparse
 import aiohttp
 import asyncio
 import os
+from bs4 import BeautifulSoup
 import tldextract
 import polars as pl
 import json
@@ -284,6 +285,14 @@ def compute_metrics(df: pl.DataFrame) -> dict[str, pl.DataFrame]:
         "ad_based_ratio": ad_based_ratio,
         "ad_domain_by_country": ad_domain_by_country,
     }
+    
+def extract_links_sync(html_str: str) -> list[str]:
+    soup = BeautifulSoup(html_str, "html.parser")
+    return [
+        a["href"]
+        for a in soup.find_all("a", href=True)
+        if a["href"].startswith(("http://", "https://")) and a["href"] not in {"http://", "https://"}
+    ]
 
 
 # Example usage:

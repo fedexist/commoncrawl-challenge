@@ -22,10 +22,10 @@ This challenge involves reading 3 WARC segments from commoncrawl.org and process
 
 ### Run on local hosted airflow
 
-* Create an airflow.env file using example.env as base
-* `make run-airflow`, will set up an airflow instance, together with the db
+* Create an airflow.env file using example.env as base. This file will be mounted as env file while running docker-compose
+* `make run-airflow`, will set up an airflow instance running on docker, together with the db (**NOTE:** you will be asked for your password as you need to chmod the /tmp folder used as staging area)
 * Wait a couple of minutes for the initialization to succeed
-* Access `localhost:8080` with credentials `admin:admin`
+* Access `localhost:8080` with the credentials `admin:admin`
 * Enable the `cc_pipeline_dag`
 * Run it manually, parameters will default to `year=2025` and `week=13`
 

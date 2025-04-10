@@ -81,14 +81,15 @@ async def generate_links(
                     html_content = record.content_stream().read()
                     html_str = html_content.decode("utf-8", errors="replace")
 
-                    # ✅ Parse links in background thread
+                    # Parse links in background thread
                     links = await loop.run_in_executor(executor, extract_links_sync, html_str)
 
                     for link in links:
-                        yield link
-                        count += 1
-                        if limit and count >= limit:
-                            return
+                        if link:
+                            yield link
+                            count += 1
+                            if limit and count >= limit:
+                                return
 
 async def read_warc_and_enqueue_generated(
     file_path: Path,
@@ -185,7 +186,7 @@ async def write_links_to_file(
     buffer = []
     last_flush = asyncio.get_event_loop().time()
 
-    async with aiofiles.open(output_file, 'w') as afp:
+    async with aiofiles.open(output_file, 'w', encoding="utf-8") as afp:
         while True:
             try:
                 await asyncio.sleep(0.01)

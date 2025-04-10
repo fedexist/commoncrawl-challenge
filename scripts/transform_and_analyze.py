@@ -29,16 +29,21 @@ def add_is_homepage_flag(df: pl.DataFrame):
     return df
 
 
-def extract_primary_link(link: str) -> str:
-    parsed = urlparse(link)
-    return f"{parsed.scheme}://{parsed.netloc}"
+def extract_primary_link(link: str) -> str | None:
+    try:
+        parsed = urlparse(link)
+        return f"{parsed.scheme}://{parsed.netloc}"
+    except ValueError:
+        # the url is invalid
+        return None
 
 
 def aggregate_links(df: pl.DataFrame) -> pl.DataFrame:
     # Step 1: Create a new column with the primary domain
     primary_links = [extract_primary_link(link) for link in df["link"]]
     df = df.with_columns(pl.Series("primary_link", primary_links))
-
+    # We filter out the rows where primary_link is None
+    df = df.filter(pl.col("primary_link").is_not_null())
     # Step 2: Filter subsections only for non-homepage links
     subsection_df: pl.DataFrame = (
         df.filter(~df["is_homepage"])

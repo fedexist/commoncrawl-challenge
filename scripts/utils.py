@@ -32,14 +32,17 @@ def is_homepage(link) -> Tuple[bool, str | None]:
     """
     from urllib.parse import urlparse
 
-    parsed_link = urlparse(link)
+    try:
+        parsed_link = urlparse(link)
+        # Check if it's the homepage
+        if parsed_link.path in ["", "/"]:
+            return (True, None)
 
-    # Check if it's the homepage
-    if parsed_link.path in ["", "/"]:
-        return (True, None)
-
-    # It's a subsection or homepage of the same site
-    return (False, parsed_link.path)
+        # It's a subsection or homepage of the same site
+        return (False, parsed_link.path)
+    except Exception as e:
+        print(f"Error parsing link '{link}': {e}")
+        return (False, None)
 
 
 # TODO: use an actual cache to store the results from the API
@@ -225,7 +228,7 @@ def clean_link(link: str) -> str:
     Cleans the link by removing unwanted characters and encoding the URL path.
     """
     # Remove unwanted characters
-    link = link.strip().replace("\n", "").replace("\r", "")
+    link = link.strip().replace("\n", "").replace("\r", "").replace('\x00', '').replace('\u0000', '')
     if "\"" in link:
         link = link.replace("\"", "")
     if "," in link:
@@ -289,7 +292,7 @@ def compute_metrics(df: pl.DataFrame) -> dict[str, pl.DataFrame]:
 def extract_links_sync(html_str: str) -> list[str]:
     soup = BeautifulSoup(html_str, "html.parser")
     return [
-        a["href"]
+        clean_link(a["href"])
         for a in soup.find_all("a", href=True)
         if a["href"].startswith(("http://", "https://")) and a["href"] not in {"http://", "https://"}
     ]

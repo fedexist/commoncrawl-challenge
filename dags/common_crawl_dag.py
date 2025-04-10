@@ -18,7 +18,7 @@ with DAG(
     # 1. Download segments
     download_segments = BashOperator(
         task_id="download_segments",
-        bash_command='bash /opt/airflow/scripts/download_segments.sh {{ dag_run.conf["year"] }}-{{ dag_run.conf["week"] }}',
+        bash_command='bash /opt/airflow/scripts/download_segments.sh {{ params.year }}-{{ params.week }}',
         cwd=cwd,
     )
 

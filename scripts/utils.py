@@ -246,7 +246,7 @@ def compute_metrics(df: pl.DataFrame) -> dict[str, pl.DataFrame]:
 
     # 1. How many websites have we managed to categorize?
     category_coverage = df.select(
-        (pl.col("category").is_not_null().sum() / df.height).alias(
+        (pl.col("category").is_not_null().sum() / total_count).alias(
             "non_null_category_rate"
         )
     )
@@ -266,9 +266,13 @@ def compute_metrics(df: pl.DataFrame) -> dict[str, pl.DataFrame]:
         .head(10)
     )
 
-    # 4. Ratio of ad-based domains
+    # 4. Ratio of ad-based domains over all non-categorized domains
+    total_not_categorized = df.filter(df["category"].is_null()).height
     ad_based_ratio = df.select(
-        (pl.col("is_ad_domain").sum() / total_count).alias("ad_domain_ratio")
+        pl.when(total_not_categorized > 0)
+        .then(pl.col("is_ad_domain").sum() / total_not_categorized)
+        .otherwise(0.0)
+        .alias("ad_domain_ratio")
     )
 
     # 5. Ratio of ad-based domains by country

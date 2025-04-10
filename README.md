@@ -28,6 +28,13 @@ This challenge involves reading 3 WARC segments from commoncrawl.org and process
 * Access `localhost:8080` with the credentials `admin:admin`
 * Enable the `cc_pipeline_dag`
 * Run it manually, parameters will default to `year=2025` and `week=13`
+* The output datasets will be saved in the `./output` folder:
+  * `external_links.parquet` (partitioned by `country_code` and `category`)
+  * `ad_based_ratio.parquet`
+  * `ad_domain_by_country.parquet`
+  * `category_coverage.parquet`
+  * `links_by_category.parquet`
+  * `top_countries.parquet`
 
 **NOTE:**: You can use the variable MAX_LINKS_PER_FILE to limit the number of links to be extracted from every WARC file.
 
